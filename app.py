@@ -26,6 +26,7 @@ def save_data(data):
     with open('users.json', 'w') as file:
         json.dump(data, file, indent=4)
         
+        
 @app.route('/')
 @app.route('/users', methods=['GET'])
 def get_users_list():
@@ -37,6 +38,7 @@ def get_users_list():
     """
     data = load_data()
     return jsonify(data)
+
 
 @app.route('/users/<int:id>', methods=['GET'])
 def get_user_by_id(id):
@@ -55,6 +57,7 @@ def get_user_by_id(id):
         if user['id'] == id:
             return jsonify(user),200
     return jsonify({"message": "User not found"}), 404
+
 
 @app.route('/users', methods=['POST'])
 def add_user():
@@ -96,6 +99,7 @@ def add_user():
     save_data(data)
     return f"{new_user['id']}", 201
 
+
 @app.route('/users/<int:id>', methods=['PUT'])
 def update_user(id):
     """
@@ -118,6 +122,7 @@ def update_user(id):
             save_data(data)
             return jsonify(user)
     return jsonify({"message": "User not found"}), 404
+
 
 @app.route('/users/<int:id>', methods=['DELETE'])
 def delete_user(id):
