@@ -1,45 +1,100 @@
-import json
 from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
 
 
 app = Flask(__name__)
 
 
-def load_data():
-    """
-    Load user data from the 'user.json' file.add()
-    
-    Returns:
-        list: A list of dictionaries, each representing a user's data.
-    """
-    with open('users.json', 'r') as file:
-        return json.load(file)
-    
+# Set the URI for the SQLAlchemy database
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 
-def save_data(data):
-    """
-    Save the given user data to the 'users.json' file.
+
+# Initialize SQLAlchemy with the Flask app
+db = SQLAlchemy(app)
+
+
+class Address(db.Model):
+    # Define the Address model with fields
+    id = db.Column(db.Integer(),primary_key=True)
+    street_address = db.Column(db.String(100),nullable=False)
+    city = db.Column(db.String(50),nullable=False)
+    state = db.Column(db.String(50),nullable=False)
+    postal_code = db.Column(db.String(20),nullable=False)
+    user_id = db.Column(db.Integer(),db.ForeignKey('user.id'),nullable=False)
     
-    Args:
-        data (list): A list of dictionaries, each representing a user's data.
-    """
-    with open('users.json', 'w') as file:
-        json.dump(data, file, indent=4)
+    def __repr__(self):
+        return (f"<Address(id={self.id}, street_address='{self.street_address}', "
+                f"city='{self.city}', state='{self.state}', postal_code='{self.postal_code}')>")
+
+     
+class PhoneNumber(db.Model):
+    # Define the PhoneNumber model with fields 
+    id = db.Column(db.Integer(),primary_key= True)
+    type = db.Column(db.String(20),nullable=False)
+    number = db.Column(db.String(20),nullable=False)
+    user_id = db.Column(db.Integer(), db.ForeignKey('user.id'), nullable=False)    
+    def __repr__(self):
+        return f"<PhoneNumber(id={self.id}, type='{self.type}', number='{self.number}')>"
+ 
+    
+class User(db.Model):
+    # Define the User model with fields 
+    id = db.Column(db.Integer(),primary_key=True) 
+    first_name = db.Column(db.String(20),unique=False,nullable=False)
+    last_name = db.Column(db.String(20),unique=False,nullable=False)
+    gender = db.Column(db.String(15),unique=False,nullable=False)
+    age = db.Column(db.Integer(),unique=False,nullable=False)
+    # lazy : determind the way to get the related data
+    address = db.relationship('Address',backref='user',uselist=False)
+    phone_numbers = db.relationship('PhoneNumber', backref='user', lazy=True)
+    
+    def __repr__(self):
+        return (f"<User(id={self.id}, first_name='{self.first_name}', last_name='{self.last_name}', "
+                f"gender='{self.gender}', age={self.age}, address={self.address}, phone_numbers={self.phone_number})>")
+
+
+@app.route("/users",methods=["POST"])
+def add_user():
+    # Retrieve the JSON data from the request
+    user_info = request.json
+    
+    address_data = user_info.get('address',{})
+    phone_number_data = user_info.get('phone_numbers', [])
+
+    
+    new_user = User(
+        # database handle the id
+        first_name = user_info.get('first_name'),
+        last_name = user_info.get('last_name'),
+        gender = user_info.get('gender'),
+        age = user_info.get('age')
+    )
+    db.session.add(new_user)
+    db.session.commit()
+    
+    # Create a new User instance 
+    new_user.address = Address(
+        street_address = address_data.get('street_address'),
+        city = address_data.get('city'),
+        state = address_data.get('state'),
+        postal_code = address_data.get('postal_code'),
+        user = new_user
+    )
+    
+    for phone_data in phone_number_data:
+        phone_number = PhoneNumber(
+            type=phone_data.get('type'),
+            number=phone_data.get('number'),
+            user = new_user
         
+        )
+        db.session.add(phone_number)
         
-@app.route('/')
-@app.route('/users', methods=['GET'])
-def get_users_list():
-    """
-    Retrieve the list of all users.
-
-    Returns:
-        Response: A JSON response containing a list of all users.
-    """
-    data = load_data()
-    return jsonify(data)
-
-
+    db.session.add(new_user)
+    db.session.commit()  
+    return jsonify({"id": new_user.id}), 201
+ 
+    
 @app.route('/users/<int:id>', methods=['GET'])
 def get_user_by_id(id):
     """
@@ -52,99 +107,72 @@ def get_user_by_id(id):
         Response: A JSON response containing the user's data if found, 
                   or a 404 error message if not found.
     """
-    data = load_data()
-    for user in data:
-        if user['id'] == id:
-            return jsonify(user),200
+
+    # Query the database for a user with the given ID
+    user = User.query.get(id)
+    
+    if user:
+        # Convert the user object to a dictionary for JSON serialization
+        user_data = {
+            'id': user.id,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'gender': user.gender,
+            'age': user.age,
+            'address': {
+                'street_address': user.address.street_address if user.address else None,
+                'city': user.address.city if user.address else None,
+                'state': user.address.state if user.address else None,
+                'postal_code': user.address.postal_code if user.address else None
+            } if user.address else None,
+            'phone_numbers': [
+                {'type': phone.type, 'number': phone.number}
+                for phone in user.phone_numbers
+            ]
+        }
+        return jsonify(user_data), 200
+    
     return jsonify({"message": "User not found"}), 404
-
-
-@app.route('/users', methods=['POST'])
-def add_user():
+ 
+ 
+@app.route("/users", methods=["GET"])
+def get_all_users():
     """
-    Add a new user to the user list.
+    Retrieve all users from the database.
 
-    The user information is provided in the request body as JSON.
-    
     Returns:
-        Response: The ID of the newly added user and a status code of 201.
+        Response: A JSON response containing a list of all users, 
+                  with each user's data.
     """
-    user_info = request.json
-    data = load_data()
-
-    address = user_info.get('address', {})
-    phone_numbers = user_info.get('phone_numbers', [])
-
-    new_user = {
-        'id': user_info.get('id'),
-        'first_name': user_info.get('first_name'),
-        'last_name': user_info.get('last_name'),
-        'gender': user_info.get('gender'),
-        'age': user_info.get('age'),
-        'address': {
-            'street_address': address.get('street_address'),
-            'city': address.get('city'),
-            'state': address.get('state'),
-            'postal_code': address.get('postal_code')
-        },
-        'phone_numbers': [
-            {
-                'type': phone.get('type'),
-                'number': phone.get('number')
-            } for phone in phone_numbers
-        ]
-    }
+    users = User.query.all()
+    all_users = []
     
-    data.append(new_user)
-    save_data(data)
-    return f"{new_user['id']}", 201
-
-
-@app.route('/users/<int:id>', methods=['PUT'])
-def update_user(id):
-    """
-    Update the information of an existing user.
-
-    The updated user information is provided in the request body as JSON.
+    for user in users:
+        user_data = {
+            "id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "gender": user.gender,
+            "age": user.age,
+            "address": {
+                "street_address": user.address.street_address,
+                "city": user.address.city,
+                "state": user.address.state,
+                "postal_code": user.address.postal_code
+            } if user.address else None,
+            "phone_numbers": [
+                {
+                    "type": phone.type,
+                    "number": phone.number
+                } for phone in user.phone_numbers
+            ]
+        }
+        all_users.append(user_data)
     
-    Args:
-        id (int): The ID of the user to update.
-    
-    Returns:
-        Response: A JSON response containing the updated user data if found,
-                  or a 404 error message if not found.
-    """
-    data = load_data()
-    for user in data:
-        if user['id'] == id:
-            updated_data = request.json
-            user.update(updated_data)
-            save_data(data)
-            return jsonify(user)
-    return jsonify({"message": "User not found"}), 404
-
-
-@app.route('/users/<int:id>', methods=['DELETE'])
-def delete_user(id):
-    """
-    Delete a user by their ID.
-    
-    Args:
-        id (int): The ID of the user to delete.
-    
-    Returns:
-        Response: A JSON response with a success message if the user is deleted,
-                  or a 404 error message if the user is not found.
-    """
-    data = load_data()
-    for user in data:
-        if user['id'] == id:
-            data.remove(user)
-            save_data(data)
-            return jsonify({"message": "User deleted"}), 200
-
-    return jsonify({"message": "User not found"}), 404
+    return jsonify(all_users), 200
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all() # Create all tables in the database
     app.run(debug=True)
