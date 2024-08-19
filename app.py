@@ -1,18 +1,48 @@
 from flask import Flask, request, jsonify
-from models import db
+from models import db,ma
 from models.user import User
 from models.address import Address
 from models.phone_number import PhoneNumber
+from models.schemas import UserSchema
  
- 
+
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+
 db.init_app(app)
+ma.init_app(app)
+
  
- 
+@app.route('/')
+def home():
+    return get_all_users()
+
+
+@app.route("/users", methods=["GET"])
+def get_all_users():
+    users = User.query.all()
+    user_schema = UserSchema(many=True)
+    return jsonify(user_schema.dump(users)), 200
+
+
+@app.route('/users/<int:id>', methods=['GET'])
+def get_user_by_id(id):
+    user = User.query.get(id)
+    # if user is not None
+    if user:
+        user_schema = UserSchema()
+        return jsonify(user_schema.dump(user)), 200
+    return jsonify({"message": "User not found"}), 404
+
+
 @app.route("/users", methods=["POST"])
-def add_user():
+def add_user(): 
     user_info = request.json
+    
+    # Validate required data
+    if not user_info.get('first_name') or not user_info.get('last_name'):
+        return jsonify({"message": "First name and last name are required"}), 400
+
     address_data = user_info.get('address', {})
     phone_number_data = user_info.get('phone_numbers', [])
  
@@ -43,58 +73,7 @@ def add_user():
    
     db.session.commit()
     return jsonify({"id": new_user.id}), 201
- 
 
-@app.route("/users", methods=["GET"])
-def get_all_users():
-    users = User.query.all()
-    all_users = []
-    for user in users:
-        user_data = {
-            "id": user.id,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "gender": user.gender,
-            "age": user.age,
-            "address": {
-                "street_address": user.address.street_address,
-                "city": user.address.city,
-                "state": user.address.state,
-                "postal_code": user.address.postal_code
-            } if user.address else None,
-            "phone_numbers": [
-                {"type": phone.type, "number": phone.number}
-                for phone in user.phone_numbers
-            ]
-        }
-        all_users.append(user_data)
-    return jsonify(all_users), 200
-
-
-@app.route('/users/<int:id>', methods=['GET'])
-def get_user_by_id(id):
-    user = User.query.get(id)
-    if user:
-        user_data = {
-            'id': user.id,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'gender': user.gender,
-            'age': user.age,
-            'address': {
-                'street_address': user.address.street_address if user.address else None,
-                'city': user.address.city if user.address else None,
-                'state': user.address.state if user.address else None,
-                'postal_code': user.address.postal_code if user.address else None
-            } if user.address else None,
-            'phone_numbers': [
-                {'type': phone.type, 'number': phone.number}
-                for phone in user.phone_numbers
-            ]
-        }
-        return jsonify(user_data), 200
-    return jsonify({"message": "User not found"}), 404
- 
 
 @app.route('/users/<int:id>', methods=['PUT'])
 def update_user_by_id(id):
@@ -103,6 +82,10 @@ def update_user_by_id(id):
 
     if not user:
         return jsonify({"message": "User not found"}), 404
+    
+    # Validate required fields
+    if 'first_name' in update_data and not update_data['first_name']:
+        return jsonify({"message": "First name cannot be empty"}), 400
 
     # Update user attributes
     user.first_name = update_data.get('first_name', user.first_name)
@@ -158,7 +141,7 @@ def delete_user_by_id(id):
 
     PhoneNumber.query.filter_by(user_id=id).delete()
 
-    # Delete the user
+    # Delete the user from the DB
     db.session.delete(user)
     db.session.commit()
 
@@ -167,6 +150,6 @@ def delete_user_by_id(id):
    
 if __name__ == "__main__":
     with app.app_context():
-        # create DB
+        # creating DB
         db.create_all()
     app.run(debug=True)
